@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Claude.ai-inspired warm light theme: ivory paper + clay accent */
+    --background: 48 33% 97%;          /* #FAF9F5 */
+    --foreground: 30 8% 15%;           /* warm near-black */
+    --card: 0 0% 100%;                 /* #FFFFFF */
+    --card-foreground: 30 8% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 8% 15%;
+    --primary: 16 60% 56%;             /* #D97757 clay */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 23% 92%;           /* #F0EEE6 */
+    --secondary-foreground: 30 8% 15%;
+    --muted: 45 23% 92%;
+    --muted-foreground: 47 4% 42%;     /* #6F6E69 */
+    --accent: 45 25% 90%;
+    --accent-foreground: 30 8% 15%;
+    --destructive: 5 52% 50%;          /* #BF4D43 */
+    --destructive-foreground: 0 0% 100%;
+    --border: 43 20% 88%;              /* #E8E5DC */
+    --input: 43 20% 86%;
+    --ring: 16 60% 56%;
+    --sidebar: 47 30% 95%;             /* slightly warmer than bg */
+    --sidebar-foreground: 30 8% 15%;
+
+    --up: 120 22% 42%;                 /* calm sage green */
+    --down: 5 52% 50%;                 /* clay red */
+    --pending: 35 60% 50%;             /* amber */
+
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 40 4% 12%;           /* #1F1E1D */
+    --foreground: 48 25% 95%;
+    --card: 40 4% 15%;
+    --card-foreground: 48 25% 95%;
+    --popover: 40 4% 15%;
+    --popover-foreground: 48 25% 95%;
+    --primary: 16 62% 60%;
+    --primary-foreground: 40 4% 10%;
+    --secondary: 40 5% 20%;
+    --secondary-foreground: 48 25% 95%;
+    --muted: 40 6% 19%;
+    --muted-foreground: 42 8% 63%;
+    --accent: 40 6% 22%;
+    --accent-foreground: 48 25% 95%;
+    --destructive: 5 55% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 5% 23%;
+    --input: 40 5% 25%;
+    --ring: 16 62% 60%;
+    --sidebar: 40 4% 14%;
+    --sidebar-foreground: 48 25% 95%;
+    --up: 120 28% 58%;
+    --down: 5 60% 62%;
+    --pending: 35 65% 60%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    /* subtle warm atmosphere instead of a flat fill */
+    background-image: radial-gradient(
+      ellipse 80% 60% at 50% -10%,
+      hsl(16 60% 56% / 0.05),
+      transparent 70%
+    );
+    background-attachment: fixed;
+  }
+
+  h1, h2, h3, .font-display {
+    @apply font-serif;
+    letter-spacing: -0.015em;
+  }
+}
+
+@layer components {
+  /* the live status dot with a soft expanding ring */
+  .status-dot {
+    @apply relative inline-flex h-2.5 w-2.5 rounded-full;
+  }
+  .status-dot::after {
+    content: "";
+    @apply absolute inset-0 rounded-full;
+    background: inherit;
+  }
+  .status-dot.is-live::after {
+    @apply animate-ping-soft;
+  }
+}
+
+/* refined, thin scrollbars that match the paper theme */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 9999px;
+  border: 3px solid hsl(var(--background));
+}
+::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }

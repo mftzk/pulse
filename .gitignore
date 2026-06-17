@@ -1,0 +1,17 @@
+# env
+.env
+
+# go
+server/pulse-api
+server/pulse-worker
+*.test
+
+# node / next
+web/node_modules
+web/.next
+web/out
+web/next-env.d.ts
+
+# misc
+.DS_Store
+*.log
