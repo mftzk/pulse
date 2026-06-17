@@ -1,10 +1,11 @@
+# Build context = REPO ROOT (works both with `docker compose` using `context: .`
+# and the Nrapken builder, which always uses the repo root as context).
 # Builds both binaries (api + worker) into one small static image.
-# Each compose service picks which to run via `command:`.
 FROM golang:1.26-alpine AS build
 WORKDIR /src
-COPY go.mod go.sum ./
+COPY server/go.mod server/go.sum ./
 RUN go mod download
-COPY . .
+COPY server/ .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/api ./cmd/api && \
     CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/worker ./cmd/worker
 

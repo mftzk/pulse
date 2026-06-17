@@ -1,13 +1,14 @@
-# Next.js standalone build. Build with Bun, run on a slim Node image.
+# Build context = REPO ROOT (works with `docker compose` using `context: .`
+# and the Nrapken builder). Next.js standalone; build with Bun, run on Node.
 FROM oven/bun:1.2-alpine AS deps
 WORKDIR /app
-COPY package.json bun.lock ./
+COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
 
 FROM oven/bun:1.2-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY web/ .
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN bun run build
 
