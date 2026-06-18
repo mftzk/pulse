@@ -11,22 +11,22 @@ import (
 // ErrNotFound is returned when a lookup matches no rows.
 var ErrNotFound = errors.New("not found")
 
-func (s *Store) CreateUser(ctx context.Context, username, passwordHash string) (User, error) {
+func (s *Store) CreateUser(ctx context.Context, username, email, passwordHash string) (User, error) {
 	var u User
 	err := s.Pool.QueryRow(ctx,
-		`INSERT INTO users (username, password_hash) VALUES ($1, $2)
-		 RETURNING id, username, password_hash, created_at`,
-		username, passwordHash,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt)
+		`INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3)
+		 RETURNING id, username, email, password_hash, created_at`,
+		username, email, passwordHash,
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.CreatedAt)
 	return u, err
 }
 
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var u User
 	err := s.Pool.QueryRow(ctx,
-		`SELECT id, username, password_hash, created_at FROM users WHERE username = $1`,
+		`SELECT id, username, email, password_hash, created_at FROM users WHERE username = $1`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}
@@ -46,11 +46,11 @@ func (s *Store) CreateSession(ctx context.Context, userID, tokenHash string, exp
 func (s *Store) UserBySessionToken(ctx context.Context, tokenHash string) (User, error) {
 	var u User
 	err := s.Pool.QueryRow(ctx,
-		`SELECT u.id, u.username, u.password_hash, u.created_at
+		`SELECT u.id, u.username, u.email, u.password_hash, u.created_at
 		   FROM sessions s JOIN users u ON u.id = s.user_id
 		  WHERE s.token_hash = $1 AND s.expires_at > now()`,
 		tokenHash,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.Email, &u.PasswordHash, &u.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return u, ErrNotFound
 	}

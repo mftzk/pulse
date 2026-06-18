@@ -5,6 +5,7 @@ import "time"
 type User struct {
 	ID           string    `json:"id"`
 	Username     string    `json:"username"`
+	Email        *string   `json:"email,omitempty"` // nullable: legacy accounts predate the email field
 	PasswordHash string    `json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
 }

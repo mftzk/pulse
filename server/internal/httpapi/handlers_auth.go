@@ -20,21 +20,42 @@ type credentials struct {
 	Password string `json:"password"`
 }
 
+type registerInput struct {
+	Username       string `json:"username"`
+	Email          string `json:"email"`
+	Password       string `json:"password"`
+	TurnstileToken string `json:"turnstile_token"`
+}
+
 type authResponse struct {
-	User db.User          `json:"user"`
+	User db.User           `json:"user"`
 	Orgs []db.Organization `json:"orgs"`
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	var in credentials
+	var in registerInput
 	if err := readJSON(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "invalid body")
 		return
 	}
 	in.Username = strings.TrimSpace(in.Username)
+	in.Email = strings.TrimSpace(strings.ToLower(in.Email))
 	if len(in.Username) < 3 || len(in.Password) < 6 {
 		writeErr(w, http.StatusBadRequest, "username must be >=3 chars and password >=6 chars")
 		return
+	}
+	if !validEmail(in.Email) {
+		writeErr(w, http.StatusBadRequest, "a valid email is required")
+		return
+	}
+
+	// Bot protection: only enforced when a Turnstile secret is configured, so
+	// local/dev environments can sign up without Cloudflare keys.
+	if s.turnstileEnabled() {
+		if err := s.verifyTurnstile(r.Context(), in.TurnstileToken, clientIP(r)); err != nil {
+			writeErr(w, http.StatusBadRequest, "captcha verification failed")
+			return
+		}
 	}
 
 	hash, err := auth.HashPassword(in.Password)
@@ -42,10 +63,10 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "hash error")
 		return
 	}
-	user, err := s.store.CreateUser(r.Context(), in.Username, hash)
+	user, err := s.store.CreateUser(r.Context(), in.Username, in.Email, hash)
 	if err != nil {
 		if isUniqueViolation(err) {
-			writeErr(w, http.StatusConflict, "username already taken")
+			writeErr(w, http.StatusConflict, "username or email already taken")
 			return
 		}
 		writeErr(w, http.StatusInternalServerError, "could not create user")
@@ -135,6 +156,33 @@ func (s *Server) createOrgUnique(ctx context.Context, name, userID string) (db.O
 		}
 	}
 	return db.Organization{}, errors.New("could not allocate unique slug")
+}
+
+// handleAuthConfig exposes non-secret client config (the Turnstile site key) so
+// the browser can render the widget. The site key is public by design; the
+// secret stays server-side. Returns an empty key when captcha is disabled.
+func (s *Server) handleAuthConfig(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"turnstile_site_key": s.cfg.TurnstileSiteKey,
+	})
+}
+
+// validEmail is a lightweight, non-validating sanity check (we have no SMTP to
+// confirm deliverability): exactly one @, with non-empty local and domain parts
+// and a dot in the domain.
+func validEmail(email string) bool {
+	if len(email) < 3 || len(email) > 254 {
+		return false
+	}
+	at := strings.IndexByte(email, '@')
+	if at <= 0 || at != strings.LastIndexByte(email, '@') {
+		return false
+	}
+	local, domain := email[:at], email[at+1:]
+	if local == "" || domain == "" || strings.IndexByte(domain, '.') < 1 {
+		return false
+	}
+	return !strings.HasSuffix(domain, ".")
 }
 
 func isUniqueViolation(err error) bool {

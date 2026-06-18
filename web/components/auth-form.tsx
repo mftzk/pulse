@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Activity } from "lucide-react";
@@ -9,35 +9,64 @@ import type { Organization, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Turnstile, type TurnstileHandle } from "@/components/turnstile";
 
 interface AuthResponse {
   user: User;
   orgs: Organization[];
 }
 
+interface AuthConfig {
+  turnstile_site_key: string;
+}
+
 export function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [siteKey, setSiteKey] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const turnstileRef = useRef<TurnstileHandle>(null);
 
   const isLogin = mode === "login";
+  const captchaRequired = !isLogin && siteKey !== "";
+
+  // Register form fetches the Turnstile site key (public) so it can render the
+  // captcha. When unset, the backend has captcha disabled and we skip it.
+  useEffect(() => {
+    if (isLogin) return;
+    api
+      .get<AuthConfig>("/auth/config")
+      .then((cfg) => setSiteKey(cfg.turnstile_site_key || ""))
+      .catch(() => setSiteKey(""));
+  }, [isLogin]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    if (captchaRequired && !turnstileToken) {
+      setError("Please complete the captcha.");
+      return;
+    }
     setLoading(true);
     try {
-      const res = await api.post<AuthResponse>(`/auth/${isLogin ? "login" : "register"}`, {
-        username,
-        password,
-      });
+      const body = isLogin
+        ? { username, password }
+        : { username, email, password, turnstile_token: turnstileToken };
+      const res = await api.post<AuthResponse>(`/auth/${isLogin ? "login" : "register"}`, body);
       const slug = res.orgs?.[0]?.slug;
       router.replace(slug ? `/${slug}/monitors` : "/");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
       setLoading(false);
+      // Turnstile tokens are single-use; reset so the user can retry.
+      if (captchaRequired) {
+        setTurnstileToken("");
+        turnstileRef.current?.reset();
+      }
     }
   }
 
@@ -68,6 +97,19 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
               minLength={3}
             />
           </div>
+          {!isLogin && (
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
             <Input
@@ -80,6 +122,9 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
               minLength={6}
             />
           </div>
+          {captchaRequired && (
+            <Turnstile ref={turnstileRef} siteKey={siteKey} onToken={setTurnstileToken} />
+          )}
           {error && <p className="text-sm text-destructive">{error}</p>}
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? "Please wait…" : isLogin ? "Sign in" : "Create account"}

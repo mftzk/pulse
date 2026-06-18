@@ -34,7 +34,7 @@ func TestClaimSkipLocked_NoDoubleClaim(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 
-	user, err := s.CreateUser(ctx, "claim-"+randSuffix(), "x")
+	user, err := s.CreateUser(ctx, "claim-"+randSuffix(), "claim-"+randSuffix()+"@example.com", "x")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,7 @@ func TestApplyCheckResult_OpensAndResolvesIncident(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 
-	user, _ := s.CreateUser(ctx, "inc-"+randSuffix(), "x")
+	user, _ := s.CreateUser(ctx, "inc-"+randSuffix(), "inc-"+randSuffix()+"@example.com", "x")
 	org, _ := s.CreateOrgWithOwner(ctx, "inc org", "inc-"+randSuffix(), user.ID)
 	m, err := s.CreateMonitor(ctx, db.Monitor{
 		OrganizationID: org.ID, Name: "site", URL: "http://example.com",
