@@ -80,6 +80,9 @@ func (s *Server) Router() http.Handler {
 				r.Put("/monitors/{id}", s.handleUpdateMonitor)
 				r.Delete("/monitors/{id}", s.handleDeleteMonitor)
 				r.Get("/monitors/{id}/results", s.handleMonitorResults)
+				r.Get("/monitors/{id}/results/range", s.handleMonitorResultsRange)
+				r.Get("/monitors/{id}/results/daily", s.handleMonitorDaily)
+				r.Get("/monitors/{id}/sla", s.handleMonitorSLA)
 
 				r.Get("/incidents", s.handleListIncidents)
 

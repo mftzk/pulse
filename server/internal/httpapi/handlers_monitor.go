@@ -4,10 +4,14 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aji/pulse/internal/db"
 	"github.com/go-chi/chi/v5"
 )
+
+// maxHistoryWindow caps how far back ranged history/SLA queries may reach.
+const maxHistoryWindow = 93 * 24 * time.Hour // ~3 months
 
 type monitorInput struct {
 	Name            string         `json:"name"`
@@ -148,6 +152,56 @@ func (s *Server) handleMonitorResults(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, results)
 }
 
+func (s *Server) handleMonitorSLA(w http.ResponseWriter, r *http.Request) {
+	org := orgFrom(r.Context())
+	months := 3
+	if v := r.URL.Query().Get("months"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			months = n
+		}
+	}
+	if months > 3 {
+		months = 3 // history is capped at the last 3 months
+	}
+	sla, err := s.store.MonthlySLA(r.Context(), org.ID, chi.URLParam(r, "id"), months)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, sla)
+}
+
+func (s *Server) handleMonitorDaily(w http.ResponseWriter, r *http.Request) {
+	org := orgFrom(r.Context())
+	from, to := parseTimeRange(r)
+	daily, err := s.store.DailySLA(r.Context(), org.ID, chi.URLParam(r, "id"), from, to)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, daily)
+}
+
+func (s *Server) handleMonitorResultsRange(w http.ResponseWriter, r *http.Request) {
+	org := orgFrom(r.Context())
+	from, to := parseTimeRange(r)
+	limit := parseLimit(r, 50, 200)
+	offset := 0
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			offset = n
+		}
+	}
+	results, total, err := s.store.ResultsInRange(r.Context(), org.ID, chi.URLParam(r, "id"), from, to, limit, offset)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data": results, "total": total, "limit": limit, "offset": offset,
+	})
+}
+
 func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 	org := orgFrom(r.Context())
 	limit := parseLimit(r, 50, 200)
@@ -157,6 +211,45 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, incidents)
+}
+
+// parseTimeRange reads optional from/to query params (RFC3339 or YYYY-MM-DD),
+// defaulting to the last 30 days, and clamps the window to [now-3mo, now].
+func parseTimeRange(r *http.Request) (from, to time.Time) {
+	now := time.Now()
+	to = parseTimeParam(r, "to", now)
+	from = parseTimeParam(r, "from", to.Add(-30*24*time.Hour))
+
+	earliest := now.Add(-maxHistoryWindow)
+	if to.After(now) {
+		to = now
+	}
+	if from.Before(earliest) {
+		from = earliest
+	}
+	if !from.Before(to) {
+		// degenerate/inverted range -> fall back to a 30-day window ending at `to`
+		from = to.Add(-30 * 24 * time.Hour)
+		if from.Before(earliest) {
+			from = earliest
+		}
+	}
+	return from, to
+}
+
+// parseTimeParam parses a query param as RFC3339 or YYYY-MM-DD, else returns def.
+func parseTimeParam(r *http.Request, key string, def time.Time) time.Time {
+	v := r.URL.Query().Get(key)
+	if v == "" {
+		return def
+	}
+	if t, err := time.Parse(time.RFC3339, v); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02", v); err == nil {
+		return t
+	}
+	return def
 }
 
 func parseLimit(r *http.Request, def, max int) int {

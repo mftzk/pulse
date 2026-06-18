@@ -6,11 +6,14 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { usePolling } from "@/lib/hooks";
 import { api } from "@/lib/api";
-import type { CheckResult, Monitor } from "@/lib/types";
+import type { CheckResult, DailySLA, Monitor, MonthlySLA, Paginated } from "@/lib/types";
 import { timeAgo } from "@/lib/utils";
 import { StatusPill } from "@/components/status";
 import { Heartbeat } from "@/components/heartbeat";
 import { MonitorForm } from "@/components/monitor-form";
+import { SlaCards } from "@/components/sla-cards";
+import { DateRange, isoDay, type Range } from "@/components/date-range";
+import { DailyBars } from "@/components/daily-bars";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -21,6 +24,16 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 
+const PAGE_SIZE = 50;
+
+// nextDay returns the day after an ISO date, used as the exclusive upper bound
+// so a selected end date is included in the range.
+function nextDay(iso: string): string {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function MonitorDetailPage({
   params,
 }: {
@@ -28,8 +41,21 @@ export default function MonitorDetailPage({
 }) {
   const { org: slug, id } = use(params);
   const router = useRouter();
-  const { data: monitor, mutate } = usePolling<Monitor>(`/orgs/${slug}/monitors/${id}`, 15000);
-  const { data: results } = usePolling<CheckResult[]>(`/orgs/${slug}/monitors/${id}/results?limit=50`, 15000);
+  const base = `/orgs/${slug}/monitors/${id}`;
+
+  const { data: monitor, mutate } = usePolling<Monitor>(base, 15000);
+  const { data: results } = usePolling<CheckResult[]>(`${base}/results?limit=50`, 15000);
+  const { data: sla } = usePolling<MonthlySLA[]>(`${base}/sla?months=3`, 60000);
+
+  const [range, setRange] = useState<Range>({ from: isoDay(30), to: isoDay(0) });
+  const [offset, setOffset] = useState(0);
+  const rangeQuery = `from=${range.from}&to=${nextDay(range.to)}`;
+  const { data: daily } = usePolling<DailySLA[]>(`${base}/results/daily?${rangeQuery}`, 60000);
+  const { data: history } = usePolling<Paginated<CheckResult>>(
+    `${base}/results/range?${rangeQuery}&limit=${PAGE_SIZE}&offset=${offset}`,
+    30000,
+  );
+
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -41,12 +67,15 @@ export default function MonitorDetailPage({
   const avg = withTimes.length
     ? Math.round(withTimes.reduce((a, r) => a + (r.response_time_ms ?? 0), 0) / withTimes.length)
     : null;
-  const uptime = results && results.length
-    ? Math.round((results.filter((r) => r.status === "up").length / results.length) * 100)
-    : null;
+  const thisMonth = sla?.[0]?.uptime_pct;
+
+  function changeRange(r: Range) {
+    setOffset(0); // reset pagination when the window changes
+    setRange(r);
+  }
 
   async function remove() {
-    await api.del(`/orgs/${slug}/monitors/${id}`);
+    await api.del(base);
     router.replace(`/${slug}/monitors`);
   }
 
@@ -76,10 +105,15 @@ export default function MonitorDetailPage({
 
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4">
         <Stat label="Status" value={monitor.current_status} accent />
-        <Stat label="Uptime (last 50)" value={uptime != null ? `${uptime}%` : "—"} />
+        <Stat label="Uptime (this month)" value={thisMonth != null ? `${thisMonth.toFixed(2)}%` : "—"} />
         <Stat label="Avg response" value={avg != null ? `${avg} ms` : "—"} />
         <Stat label="Last checked" value={timeAgo(monitor.last_checked_at)} />
       </div>
+
+      <section className="mb-8">
+        <p className="mb-3 text-sm font-medium text-muted-foreground">Monthly SLA</p>
+        <SlaCards sla={sla ?? []} />
+      </section>
 
       <Card className="mb-6">
         <CardContent className="p-6">
@@ -88,37 +122,65 @@ export default function MonitorDetailPage({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="p-0">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-6 py-3 font-medium">Time</th>
-                <th className="px-6 py-3 font-medium">Status</th>
-                <th className="px-6 py-3 font-medium">Code</th>
-                <th className="px-6 py-3 font-medium">Response</th>
-                <th className="px-6 py-3 font-medium">Detail</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(results ?? []).slice(0, 20).map((r) => (
-                <tr key={r.id} className="border-b border-border/60 last:border-0">
-                  <td className="px-6 py-3 text-muted-foreground">{timeAgo(r.checked_at)}</td>
-                  <td className="px-6 py-3">
-                    <span className={r.status === "up" ? "text-up" : "text-down"}>{r.status}</span>
-                  </td>
-                  <td className="px-6 py-3 font-mono text-xs">{r.status_code ?? "—"}</td>
-                  <td className="px-6 py-3 font-mono text-xs">{r.response_time_ms != null ? `${r.response_time_ms}ms` : "—"}</td>
-                  <td className="max-w-[14rem] truncate px-6 py-3 text-xs text-muted-foreground">{r.error ?? ""}</td>
+      <section className="mb-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+          <p className="text-sm font-medium text-muted-foreground">History</p>
+          <DateRange value={range} onChange={changeRange} />
+        </div>
+        <Card className="mb-6">
+          <CardContent className="p-6">
+            <DailyBars daily={daily ?? []} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent className="p-0">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
+                  <th className="px-6 py-3 font-medium">Time</th>
+                  <th className="px-6 py-3 font-medium">Status</th>
+                  <th className="px-6 py-3 font-medium">Code</th>
+                  <th className="px-6 py-3 font-medium">Response</th>
+                  <th className="px-6 py-3 font-medium">Detail</th>
                 </tr>
-              ))}
-              {results && results.length === 0 && (
-                <tr><td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">No checks recorded yet.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </CardContent>
-      </Card>
+              </thead>
+              <tbody>
+                {(history?.data ?? []).map((r) => (
+                  <tr key={r.id} className="border-b border-border/60 last:border-0">
+                    <td className="px-6 py-3 text-muted-foreground">{new Date(r.checked_at).toLocaleString()}</td>
+                    <td className="px-6 py-3">
+                      <span className={r.status === "up" ? "text-up" : "text-down"}>{r.status}</span>
+                    </td>
+                    <td className="px-6 py-3 font-mono text-xs">{r.status_code ?? "—"}</td>
+                    <td className="px-6 py-3 font-mono text-xs">{r.response_time_ms != null ? `${r.response_time_ms}ms` : "—"}</td>
+                    <td className="max-w-[14rem] truncate px-6 py-3 text-xs text-muted-foreground">{r.error ?? ""}</td>
+                  </tr>
+                ))}
+                {history && history.data.length === 0 && (
+                  <tr><td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">No checks in this range.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </CardContent>
+        </Card>
+
+        {history && history.total > 0 && (
+          <div className="mt-4 flex items-center justify-between text-sm text-muted-foreground">
+            <span>
+              {history.offset + 1}–{Math.min(history.offset + PAGE_SIZE, history.total)} of {history.total.toLocaleString()}
+            </span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}>
+                Previous
+              </Button>
+              <Button variant="outline" size="sm" disabled={offset + PAGE_SIZE >= history.total} onClick={() => setOffset(offset + PAGE_SIZE)}>
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
+      </section>
 
       <Dialog open={editing} onOpenChange={setEditing}>
         <DialogContent>

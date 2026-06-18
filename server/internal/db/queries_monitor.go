@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -257,6 +259,129 @@ func (s *Store) RecentResults(ctx context.Context, orgID, monitorID string, limi
 		results = append(results, r)
 	}
 	return results, rows.Err()
+}
+
+// MonthlySLA returns count-based uptime per calendar month for a monitor,
+// covering the current month plus the previous (months-1) months, newest first.
+func (s *Store) MonthlySLA(ctx context.Context, orgID, monitorID string, months int) ([]MonthlySLA, error) {
+	rows, err := s.Pool.Query(ctx,
+		`SELECT to_char(date_trunc('month', checked_at), 'YYYY-MM') AS month,
+		        count(*) AS total,
+		        count(*) FILTER (WHERE status = 'up') AS up,
+		        (avg(response_time_ms) FILTER (WHERE response_time_ms IS NOT NULL))::float8 AS avg_ms
+		   FROM check_results
+		  WHERE monitor_id = $1 AND organization_id = $2
+		    AND checked_at >= date_trunc('month', now()) - make_interval(months => $3 - 1)
+		  GROUP BY 1
+		  ORDER BY 1 DESC`,
+		monitorID, orgID, months,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []MonthlySLA{}
+	for rows.Next() {
+		var m MonthlySLA
+		var avg *float64
+		if err := rows.Scan(&m.Month, &m.Total, &m.Up, &avg); err != nil {
+			return nil, err
+		}
+		m.UptimePct = uptimePct(m.Up, m.Total)
+		m.AvgMs = roundAvg(avg)
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// DailySLA returns count-based uptime per day within [from, to), oldest first.
+func (s *Store) DailySLA(ctx context.Context, orgID, monitorID string, from, to time.Time) ([]DailySLA, error) {
+	rows, err := s.Pool.Query(ctx,
+		`SELECT to_char(date_trunc('day', checked_at), 'YYYY-MM-DD') AS day,
+		        count(*) AS total,
+		        count(*) FILTER (WHERE status = 'up') AS up,
+		        (avg(response_time_ms) FILTER (WHERE response_time_ms IS NOT NULL))::float8 AS avg_ms
+		   FROM check_results
+		  WHERE monitor_id = $1 AND organization_id = $2
+		    AND checked_at >= $3 AND checked_at < $4
+		  GROUP BY 1
+		  ORDER BY 1 ASC`,
+		monitorID, orgID, from, to,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []DailySLA{}
+	for rows.Next() {
+		var d DailySLA
+		var avg *float64
+		if err := rows.Scan(&d.Day, &d.Total, &d.Up, &avg); err != nil {
+			return nil, err
+		}
+		d.UptimePct = uptimePct(d.Up, d.Total)
+		d.AvgMs = roundAvg(avg)
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// ResultsInRange returns raw check results within [from, to) newest-first,
+// paginated by limit/offset, plus the total count for the range.
+func (s *Store) ResultsInRange(ctx context.Context, orgID, monitorID string, from, to time.Time, limit, offset int) ([]CheckResult, int, error) {
+	var total int
+	if err := s.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM check_results
+		  WHERE monitor_id = $1 AND organization_id = $2
+		    AND checked_at >= $3 AND checked_at < $4`,
+		monitorID, orgID, from, to,
+	).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	rows, err := s.Pool.Query(ctx,
+		`SELECT id, monitor_id, organization_id, worker_id, checked_at, status, status_code, response_time_ms, error
+		   FROM check_results
+		  WHERE monitor_id = $1 AND organization_id = $2
+		    AND checked_at >= $3 AND checked_at < $4
+		  ORDER BY checked_at DESC
+		  LIMIT $5 OFFSET $6`,
+		monitorID, orgID, from, to, limit, offset,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	results := []CheckResult{}
+	for rows.Next() {
+		var r CheckResult
+		if err := rows.Scan(&r.ID, &r.MonitorID, &r.OrganizationID, &r.WorkerID, &r.CheckedAt,
+			&r.Status, &r.StatusCode, &r.ResponseTimeMs, &r.Error); err != nil {
+			return nil, 0, err
+		}
+		results = append(results, r)
+	}
+	return results, total, rows.Err()
+}
+
+// uptimePct returns up/total*100 rounded to 2 decimals (0 when no checks).
+func uptimePct(up, total int) float64 {
+	if total == 0 {
+		return 0
+	}
+	return math.Round(float64(up)/float64(total)*10000) / 100
+}
+
+// roundAvg rounds a nullable average milliseconds value to the nearest int.
+func roundAvg(avg *float64) *int {
+	if avg == nil {
+		return nil
+	}
+	n := int(math.Round(*avg))
+	return &n
 }
 
 // ListIncidents returns incidents for an org, newest first, joined with monitor name.

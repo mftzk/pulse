@@ -57,6 +57,24 @@ type CheckResult struct {
 	Error          *string   `json:"error"`
 }
 
+// MonthlySLA is a count-based uptime rollup for one calendar month.
+type MonthlySLA struct {
+	Month     string  `json:"month"` // "2026-06"
+	Total     int     `json:"total"`
+	Up        int     `json:"up"`
+	UptimePct float64 `json:"uptime_pct"` // up/total*100, rounded to 2 decimals
+	AvgMs     *int    `json:"avg_response_ms"`
+}
+
+// DailySLA is the same rollup bucketed per day, for ranged history views.
+type DailySLA struct {
+	Day       string  `json:"day"` // "2026-06-18"
+	Total     int     `json:"total"`
+	Up        int     `json:"up"`
+	UptimePct float64 `json:"uptime_pct"`
+	AvgMs     *int    `json:"avg_response_ms"`
+}
+
 type Incident struct {
 	ID             string     `json:"id"`
 	MonitorID      string     `json:"monitor_id"`

@@ -63,6 +63,29 @@ export interface Incident {
   cause: string | null;
 }
 
+export interface MonthlySLA {
+  month: string; // "2026-06"
+  total: number;
+  up: number;
+  uptime_pct: number;
+  avg_response_ms: number | null;
+}
+
+export interface DailySLA {
+  day: string; // "2026-06-18"
+  total: number;
+  up: number;
+  uptime_pct: number;
+  avg_response_ms: number | null;
+}
+
+export interface Paginated<T> {
+  data: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface NotificationChannel {
   id: string;
   type: string;
