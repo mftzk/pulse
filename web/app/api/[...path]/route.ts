@@ -44,6 +44,11 @@ async function proxy(req: NextRequest) {
     for (const c of setCookies) respHeaders.append("set-cookie", c);
   }
 
+  // 204/205/304 are null-body statuses: passing any body (even an empty
+  // ArrayBuffer) to the Response constructor throws. Forward them body-less.
+  if (upstream.status === 204 || upstream.status === 205 || upstream.status === 304) {
+    return new Response(null, { status: upstream.status, headers: respHeaders });
+  }
   const body = await upstream.arrayBuffer();
   return new Response(body, { status: upstream.status, headers: respHeaders });
 }
