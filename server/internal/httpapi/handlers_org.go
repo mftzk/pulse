@@ -101,6 +101,7 @@ func (s *Server) handleListChannels(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 	org := orgFrom(r.Context())
 	var in struct {
+		Type       string `json:"type"`
 		Name       string `json:"name"`
 		WebhookURL string `json:"webhook_url"`
 	}
@@ -108,10 +109,22 @@ func (s *Server) handleCreateChannel(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "a valid webhook_url is required")
 		return
 	}
-	if strings.TrimSpace(in.Name) == "" {
-		in.Name = "Discord"
+	in.Type = strings.TrimSpace(strings.ToLower(in.Type))
+	if in.Type == "" {
+		in.Type = "discord"
 	}
-	ch, err := s.store.CreateChannel(r.Context(), org.ID, in.Name, in.WebhookURL)
+	if in.Type != "discord" && in.Type != "slack" {
+		writeErr(w, http.StatusBadRequest, "type must be 'discord' or 'slack'")
+		return
+	}
+	if strings.TrimSpace(in.Name) == "" {
+		if in.Type == "slack" {
+			in.Name = "Slack"
+		} else {
+			in.Name = "Discord"
+		}
+	}
+	ch, err := s.store.CreateChannel(r.Context(), org.ID, in.Type, in.Name, in.WebhookURL)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "could not create channel")
 		return

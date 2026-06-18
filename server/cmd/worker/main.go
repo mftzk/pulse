@@ -23,6 +23,7 @@ type worker struct {
 	cfg     config.Config
 	store   *db.Store
 	discord *notify.Discord
+	slack   *notify.Slack
 }
 
 func main() {
@@ -40,7 +41,7 @@ func main() {
 	}
 	defer store.Close()
 
-	w := &worker{cfg: cfg, store: store, discord: notify.NewDiscord()}
+	w := &worker{cfg: cfg, store: store, discord: notify.NewDiscord(), slack: notify.NewSlack()}
 	log.Printf("worker %q started (batch=%d, lease=%s, poll=%s)",
 		cfg.WorkerID, cfg.ClaimBatch, cfg.LeaseDuration, cfg.PollInterval)
 	w.run(ctx)
@@ -132,25 +133,39 @@ func (w *worker) process(ctx context.Context, m db.Monitor) {
 }
 
 func (w *worker) alertDown(ctx context.Context, m db.Monitor, cause string) {
-	hooks, err := w.store.EnabledWebhooksForOrg(ctx, m.OrganizationID)
-	if err != nil || len(hooks) == 0 {
+	byType, err := w.store.EnabledWebhooksByType(ctx, m.OrganizationID)
+	if err != nil || len(byType) == 0 {
 		return
 	}
 	if cause == "" {
 		cause = "no response"
 	}
-	if err := w.discord.NotifyDown(ctx, hooks, m.Name, m.URL, cause); err != nil {
-		log.Printf("[%s] discord down alert failed: %v", w.cfg.WorkerID, err)
+	if hooks := byType["discord"]; len(hooks) > 0 {
+		if err := w.discord.NotifyDown(ctx, hooks, m.Name, m.URL, cause); err != nil {
+			log.Printf("[%s] discord down alert failed: %v", w.cfg.WorkerID, err)
+		}
+	}
+	if hooks := byType["slack"]; len(hooks) > 0 {
+		if err := w.slack.NotifyDown(ctx, hooks, m.Name, m.URL, cause); err != nil {
+			log.Printf("[%s] slack down alert failed: %v", w.cfg.WorkerID, err)
+		}
 	}
 }
 
 func (w *worker) alertRecovered(ctx context.Context, m db.Monitor, downtime time.Duration) {
-	hooks, err := w.store.EnabledWebhooksForOrg(ctx, m.OrganizationID)
-	if err != nil || len(hooks) == 0 {
+	byType, err := w.store.EnabledWebhooksByType(ctx, m.OrganizationID)
+	if err != nil || len(byType) == 0 {
 		return
 	}
-	if err := w.discord.NotifyRecovered(ctx, hooks, m.Name, m.URL, downtime); err != nil {
-		log.Printf("[%s] discord recovered alert failed: %v", w.cfg.WorkerID, err)
+	if hooks := byType["discord"]; len(hooks) > 0 {
+		if err := w.discord.NotifyRecovered(ctx, hooks, m.Name, m.URL, downtime); err != nil {
+			log.Printf("[%s] discord recovered alert failed: %v", w.cfg.WorkerID, err)
+		}
+	}
+	if hooks := byType["slack"]; len(hooks) > 0 {
+		if err := w.slack.NotifyRecovered(ctx, hooks, m.Name, m.URL, downtime); err != nil {
+			log.Printf("[%s] slack recovered alert failed: %v", w.cfg.WorkerID, err)
+		}
 	}
 }
 

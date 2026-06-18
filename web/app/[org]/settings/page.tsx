@@ -93,8 +93,16 @@ function MembersSection({ slug, isOwner, currentUserId }: { slug: string; isOwne
   );
 }
 
+type ChannelType = "discord" | "slack";
+
+const PLACEHOLDERS: Record<ChannelType, string> = {
+  discord: "https://discord.com/api/webhooks/...",
+  slack: "https://hooks.slack.com/services/...",
+};
+
 function ChannelsSection({ slug }: { slug: string }) {
   const { data: channels, mutate } = useSWR<NotificationChannel[]>(`/orgs/${slug}/channels`, fetcher);
+  const [type, setType] = useState<ChannelType>("discord");
   const [name, setName] = useState("");
   const [webhook, setWebhook] = useState("");
   const [error, setError] = useState("");
@@ -105,7 +113,8 @@ function ChannelsSection({ slug }: { slug: string }) {
     setBusy(true);
     setError("");
     try {
-      await api.post(`/orgs/${slug}/channels`, { name: name || "Discord", webhook_url: webhook });
+      const fallback = type === "slack" ? "Slack" : "Discord";
+      await api.post(`/orgs/${slug}/channels`, { type, name: name || fallback, webhook_url: webhook });
       setName("");
       setWebhook("");
       mutate();
@@ -124,8 +133,8 @@ function ChannelsSection({ slug }: { slug: string }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="font-serif">Discord alerts</CardTitle>
-        <CardDescription>We post here when a monitor goes down or recovers.</CardDescription>
+        <CardTitle className="font-serif">Alert channels</CardTitle>
+        <CardDescription>We post to Discord and Slack when a monitor goes down or recovers.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {channels && channels.length > 0 && (
@@ -134,7 +143,12 @@ function ChannelsSection({ slug }: { slug: string }) {
               <div key={c.id} className="flex items-center gap-3 px-4 py-3">
                 <Webhook className="h-4 w-4 text-primary" />
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{c.name}</p>
+                  <p className="flex items-center gap-2 text-sm font-medium">
+                    {c.name}
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                      {c.type}
+                    </span>
+                  </p>
                   <p className="truncate font-mono text-xs text-muted-foreground">{c.webhook_url}</p>
                 </div>
                 <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={() => remove(c.id)}>
@@ -146,14 +160,26 @@ function ChannelsSection({ slug }: { slug: string }) {
         )}
 
         <form onSubmit={add} className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-[1fr_2fr]">
+          <div className="grid gap-3 sm:grid-cols-[auto_1fr_2fr]">
+            <div className="space-y-2">
+              <Label htmlFor="ch-type">Type</Label>
+              <select
+                id="ch-type"
+                value={type}
+                onChange={(e) => setType(e.target.value as ChannelType)}
+                className="h-9 w-full rounded-md border border-border bg-transparent px-2 text-sm text-foreground"
+              >
+                <option value="discord">Discord</option>
+                <option value="slack">Slack</option>
+              </select>
+            </div>
             <div className="space-y-2">
               <Label htmlFor="ch-name">Name</Label>
-              <Input id="ch-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Discord" />
+              <Input id="ch-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={type === "slack" ? "Slack" : "Discord"} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="ch-url">Webhook URL</Label>
-              <Input id="ch-url" value={webhook} onChange={(e) => setWebhook(e.target.value)} placeholder="https://discord.com/api/webhooks/..." required />
+              <Input id="ch-url" value={webhook} onChange={(e) => setWebhook(e.target.value)} placeholder={PLACEHOLDERS[type]} required />
             </div>
           </div>
           {error && <p className="text-sm text-destructive">{error}</p>}

@@ -152,13 +152,13 @@ func (s *Store) ListChannels(ctx context.Context, orgID string) ([]NotificationC
 	return chans, rows.Err()
 }
 
-func (s *Store) CreateChannel(ctx context.Context, orgID, name, webhookURL string) (NotificationChannel, error) {
+func (s *Store) CreateChannel(ctx context.Context, orgID, chType, name, webhookURL string) (NotificationChannel, error) {
 	var c NotificationChannel
 	err := s.Pool.QueryRow(ctx,
 		`INSERT INTO notification_channels (organization_id, type, name, webhook_url)
-		 VALUES ($1, 'discord', $2, $3)
+		 VALUES ($1, $2, $3, $4)
 		 RETURNING id, organization_id, type, name, webhook_url, enabled, created_at`,
-		orgID, name, webhookURL,
+		orgID, chType, name, webhookURL,
 	).Scan(&c.ID, &c.OrganizationID, &c.Type, &c.Name, &c.WebhookURL, &c.Enabled, &c.CreatedAt)
 	return c, err
 }
@@ -171,11 +171,13 @@ func (s *Store) DeleteChannel(ctx context.Context, orgID, channelID string) erro
 	return err
 }
 
-// EnabledWebhooksForOrg returns the webhook URLs of all enabled discord channels.
-func (s *Store) EnabledWebhooksForOrg(ctx context.Context, orgID string) ([]string, error) {
+// EnabledWebhooksByType returns the webhook URLs of all enabled channels for an
+// org, grouped by channel type (e.g. "discord", "slack"), so the worker can
+// dispatch each to the right notifier.
+func (s *Store) EnabledWebhooksByType(ctx context.Context, orgID string) (map[string][]string, error) {
 	rows, err := s.Pool.Query(ctx,
-		`SELECT webhook_url FROM notification_channels
-		  WHERE organization_id = $1 AND enabled AND type = 'discord'`,
+		`SELECT type, webhook_url FROM notification_channels
+		  WHERE organization_id = $1 AND enabled`,
 		orgID,
 	)
 	if err != nil {
@@ -183,13 +185,13 @@ func (s *Store) EnabledWebhooksForOrg(ctx context.Context, orgID string) ([]stri
 	}
 	defer rows.Close()
 
-	urls := []string{}
+	byType := map[string][]string{}
 	for rows.Next() {
-		var u string
-		if err := rows.Scan(&u); err != nil {
+		var t, u string
+		if err := rows.Scan(&t, &u); err != nil {
 			return nil, err
 		}
-		urls = append(urls, u)
+		byType[t] = append(byType[t], u)
 	}
-	return urls, rows.Err()
+	return byType, rows.Err()
 }
