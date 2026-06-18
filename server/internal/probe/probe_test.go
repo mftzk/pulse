@@ -51,6 +51,24 @@ func TestProbe_ExpectedStatusMatch(t *testing.T) {
 	}
 }
 
+func TestProbe_ExpectedClassMatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound) // 404
+	}))
+	defer srv.Close()
+
+	// expecting the 4xx class -> a 404 should count as up
+	up := Do(context.Background(), Target{URL: srv.URL, ExpectedStatus: 4, TimeoutMs: 2000})
+	if !up.Up {
+		t.Fatalf("expected up for 404 with 4xx class, got: %s", up.Error)
+	}
+	// expecting the 5xx class -> a 404 should count as down
+	down := Do(context.Background(), Target{URL: srv.URL, ExpectedStatus: 5, TimeoutMs: 2000})
+	if down.Up {
+		t.Fatal("expected down for 404 with 5xx class")
+	}
+}
+
 func TestProbe_Timeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(300 * time.Millisecond)

@@ -77,11 +77,17 @@ func Do(ctx context.Context, t Target) Result {
 	return res
 }
 
-// statusIsUp decides up/down from the response code. When expected is non-zero
-// the code must match exactly; otherwise any 2xx is considered up.
+// statusIsUp decides up/down from the response code, interpreting `expected`:
+//   - 0        => default: any 2xx is up
+//   - 1..5     => status CLASS: 2 => 2xx, 3 => 3xx, 4 => 4xx, 5 => 5xx
+//   - >= 100   => exact code match (backward compat / API callers)
 func statusIsUp(code, expected int) bool {
-	if expected > 0 {
+	switch {
+	case expected == 0:
+		return code >= 200 && code < 300
+	case expected >= 1 && expected <= 5:
+		return code >= expected*100 && code < expected*100+100
+	default:
 		return code == expected
 	}
-	return code >= 200 && code < 300
 }

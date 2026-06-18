@@ -21,13 +21,30 @@ const INTERVALS = [
   { label: "15 minutes", value: 900 },
 ];
 
+const STATUS_CLASSES = [
+  { label: "2xx · Success", value: 2 },
+  { label: "3xx · Redirect", value: 3 },
+  { label: "4xx · Client error", value: 4 },
+  { label: "5xx · Server error", value: 5 },
+];
+
+// Normalize a stored expected_status into a class digit (2..5).
+// Legacy values: 0 (any 2xx) -> 2; an exact code like 404 -> its class (4).
+function toStatusClass(v: number): number {
+  if (v >= 100) return Math.floor(v / 100);
+  if (v >= 2 && v <= 5) return v;
+  return 2;
+}
+
 export function MonitorForm({ orgSlug, monitor, onSaved, onCancel }: Props) {
   const [name, setName] = useState(monitor?.name ?? "");
   const [url, setUrl] = useState(monitor?.url ?? "https://");
   const [method, setMethod] = useState(monitor?.method ?? "GET");
   const [interval, setInterval] = useState(monitor?.interval_seconds ?? 60);
   const [timeout, setTimeout] = useState(monitor?.timeout_ms ?? 10000);
-  const [expected, setExpected] = useState(monitor?.expected_status ?? 0);
+  // expected_status is stored as a status CLASS digit (2=2xx, 3=3xx, 4=4xx, 5=5xx).
+  // Map any legacy value (0=any 2xx, or an exact code like 404) to its class.
+  const [expected, setExpected] = useState(toStatusClass(monitor?.expected_status ?? 0));
   const [failThreshold, setFailThreshold] = useState(monitor?.fail_threshold ?? 1);
   const [followRedirects, setFollowRedirects] = useState(monitor?.follow_redirects ?? true);
   const [enabled, setEnabled] = useState(monitor?.enabled ?? true);
@@ -95,8 +112,10 @@ export function MonitorForm({ orgSlug, monitor, onSaved, onCancel }: Props) {
           <Input id="m-timeout" type="number" min={500} value={timeout} onChange={(e) => setTimeout(Number(e.target.value))} />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="m-expected">Expected code</Label>
-          <Input id="m-expected" type="number" min={0} value={expected} onChange={(e) => setExpected(Number(e.target.value))} placeholder="0 = any 2xx" />
+          <Label htmlFor="m-expected">Expected status</Label>
+          <select id="m-expected" className={selectCls} value={expected} onChange={(e) => setExpected(Number(e.target.value))}>
+            {STATUS_CLASSES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </select>
         </div>
         <div className="space-y-2">
           <Label htmlFor="m-threshold">Fail threshold</Label>
