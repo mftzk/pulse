@@ -3,7 +3,7 @@
 import { use, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { usePolling } from "@/lib/hooks";
 import { api } from "@/lib/api";
 import type { CheckResult, DailySLA, Monitor, MonthlySLA, Paginated } from "@/lib/types";
@@ -12,8 +12,7 @@ import { StatusPill } from "@/components/status";
 import { Heartbeat } from "@/components/heartbeat";
 import { MonitorForm } from "@/components/monitor-form";
 import { SlaCards } from "@/components/sla-cards";
-import { DateRange, isoDay, type Range } from "@/components/date-range";
-import { DailyBars } from "@/components/daily-bars";
+import { UptimeCalendar } from "@/components/uptime-calendar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -25,13 +24,28 @@ import {
 } from "@/components/ui/dialog";
 
 const PAGE_SIZE = 50;
+const WINDOW = 3; // months shown side by side
 
-// nextDay returns the day after an ISO date, used as the exclusive upper bound
-// so a selected end date is included in the range.
-function nextDay(iso: string): string {
-  const d = new Date(iso + "T00:00:00Z");
-  d.setUTCDate(d.getUTCDate() + 1);
-  return d.toISOString().slice(0, 10);
+// Months are tracked as a single integer index (year*12 + month0) so windowing
+// and navigation are plain arithmetic.
+function toIndex(year: number, month0: number): number {
+  return year * 12 + month0;
+}
+function fromIndex(mi: number): { year: number; month: number } {
+  return { year: Math.floor(mi / 12), month: (mi % 12) + 1 };
+}
+function monthStartISO(mi: number): string {
+  const { year, month } = fromIndex(mi);
+  return `${year}-${month < 10 ? "0" : ""}${month}-01`;
+}
+function monthLabel(mi: number): string {
+  const { year, month } = fromIndex(mi);
+  return new Date(Date.UTC(year, month - 1, 1)).toLocaleString(undefined, { month: "long", year: "numeric" });
+}
+
+function currentMonthIndex(): number {
+  const n = new Date();
+  return toIndex(n.getFullYear(), n.getMonth());
 }
 
 export default function MonitorDetailPage({
@@ -47,14 +61,24 @@ export default function MonitorDetailPage({
   const { data: results } = usePolling<CheckResult[]>(`${base}/results?limit=50`, 15000);
   const { data: sla } = usePolling<MonthlySLA[]>(`${base}/sla?months=3`, 60000);
 
-  const [range, setRange] = useState<Range>({ from: isoDay(30), to: isoDay(0) });
+  // `anchor` is the rightmost (newest) month of the visible window.
+  const [anchor, setAnchor] = useState(currentMonthIndex());
   const [offset, setOffset] = useState(0);
-  const rangeQuery = `from=${range.from}&to=${nextDay(range.to)}`;
+  const windowStart = anchor - (WINDOW - 1);
+  const rangeQuery = `from=${monthStartISO(windowStart)}&to=${monthStartISO(anchor + 1)}`;
   const { data: daily } = usePolling<DailySLA[]>(`${base}/results/daily?${rangeQuery}`, 60000);
   const { data: history } = usePolling<Paginated<CheckResult>>(
     `${base}/results/range?${rangeQuery}&limit=${PAGE_SIZE}&offset=${offset}`,
     30000,
   );
+  const byDay = new Map((daily ?? []).map((d) => [d.day, d]));
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const atLatest = anchor >= currentMonthIndex();
+
+  function shiftWindow(months: number) {
+    setOffset(0);
+    setAnchor((a) => Math.min(currentMonthIndex(), a + months));
+  }
 
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -68,11 +92,6 @@ export default function MonitorDetailPage({
     ? Math.round(withTimes.reduce((a, r) => a + (r.response_time_ms ?? 0), 0) / withTimes.length)
     : null;
   const thisMonth = sla?.[0]?.uptime_pct;
-
-  function changeRange(r: Range) {
-    setOffset(0); // reset pagination when the window changes
-    setRange(r);
-  }
 
   async function remove() {
     await api.del(base);
@@ -125,11 +144,24 @@ export default function MonitorDetailPage({
       <section className="mb-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
           <p className="text-sm font-medium text-muted-foreground">History</p>
-          <DateRange value={range} onChange={changeRange} />
+          <div className="flex items-center gap-3">
+            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => shiftWindow(-WINDOW)} aria-label="Earlier months">
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="min-w-[14rem] text-center text-sm font-medium">
+              {monthLabel(windowStart)} to {monthLabel(anchor)}
+            </span>
+            <Button variant="outline" size="icon" className="h-9 w-9" disabled={atLatest} onClick={() => shiftWindow(WINDOW)} aria-label="Later months">
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
         <Card className="mb-6">
-          <CardContent className="p-6">
-            <DailyBars daily={daily ?? []} />
+          <CardContent className="flex flex-wrap gap-8 p-6">
+            {Array.from({ length: WINDOW }, (_, i) => windowStart + i).map((mi) => {
+              const { year, month } = fromIndex(mi);
+              return <UptimeCalendar key={mi} year={year} month={month} days={byDay} todayISO={todayISO} />;
+            })}
           </CardContent>
         </Card>
 

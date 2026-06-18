@@ -11,7 +11,9 @@ import (
 )
 
 // maxHistoryWindow caps how far back ranged history/SLA queries may reach.
-const maxHistoryWindow = 93 * 24 * time.Hour // ~3 months
+// Generous (~13 months) so the calendar can navigate to older months; check
+// results are never pruned, so the data is there to serve.
+const maxHistoryWindow = 400 * 24 * time.Hour
 
 type monitorInput struct {
 	Name            string         `json:"name"`
