@@ -21,6 +21,15 @@ const INTERVALS = [
   { label: "15 minutes", value: 900 },
 ];
 
+// How often to repeat the alert while a monitor stays down. 0 = off.
+const REMINDERS = [
+  { label: "Off", value: 0 },
+  { label: "Every 5 minutes", value: 300 },
+  { label: "Every 10 minutes", value: 600 },
+  { label: "Every 30 minutes", value: 1800 },
+  { label: "Every hour", value: 3600 },
+];
+
 const STATUS_CLASSES = [
   { label: "2xx · Success", value: 2 },
   { label: "3xx · Redirect", value: 3 },
@@ -46,6 +55,7 @@ export function MonitorForm({ orgSlug, monitor, onSaved, onCancel }: Props) {
   // Map any legacy value (0=any 2xx, or an exact code like 404) to its class.
   const [expected, setExpected] = useState(toStatusClass(monitor?.expected_status ?? 0));
   const [failThreshold, setFailThreshold] = useState(monitor?.fail_threshold ?? 1);
+  const [reminder, setReminder] = useState(monitor?.reminder_interval_seconds ?? 600);
   const [followRedirects, setFollowRedirects] = useState(monitor?.follow_redirects ?? true);
   const [enabled, setEnabled] = useState(monitor?.enabled ?? true);
   const [error, setError] = useState("");
@@ -63,6 +73,7 @@ export function MonitorForm({ orgSlug, monitor, onSaved, onCancel }: Props) {
       timeout_ms: timeout,
       expected_status: expected,
       fail_threshold: failThreshold,
+      reminder_interval_seconds: reminder,
       follow_redirects: followRedirects,
       enabled,
     };
@@ -121,6 +132,14 @@ export function MonitorForm({ orgSlug, monitor, onSaved, onCancel }: Props) {
           <Label htmlFor="m-threshold">Fail threshold</Label>
           <Input id="m-threshold" type="number" min={1} value={failThreshold} onChange={(e) => setFailThreshold(Number(e.target.value))} />
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="m-reminder">Repeat alert while down</Label>
+        <select id="m-reminder" className={selectCls} value={reminder} onChange={(e) => setReminder(Number(e.target.value))}>
+          {REMINDERS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
+        </select>
+        <p className="text-xs text-muted-foreground">Re-send the down notification on this interval until the monitor recovers.</p>
       </div>
 
       <div className="flex items-center gap-6 pt-1">

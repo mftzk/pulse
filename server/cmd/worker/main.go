@@ -93,8 +93,10 @@ func (w *worker) process(ctx context.Context, m db.Monitor) {
 			CurrentStatus:       m.CurrentStatus,
 			ConsecutiveFailures: m.ConsecutiveFailures,
 			FailThreshold:       m.FailThreshold,
+			ReminderInterval:    time.Duration(m.ReminderIntervalSeconds) * time.Second,
+			LastAlertSentAt:     m.LastAlertSentAt,
 		},
-		res.Up, res.Error,
+		res.Up, res.Error, time.Now(),
 	)
 
 	out := db.CheckOutcome{
@@ -115,6 +117,7 @@ func (w *worker) process(ctx context.Context, m db.Monitor) {
 		ConsecutiveFailures: dec.ConsecutiveFailures,
 		OpenIncident:        dec.OpenIncident,
 		ResolveIncident:     dec.ResolveIncident,
+		MarkAlerted:         dec.MarkAlerted,
 		Cause:               dec.Cause,
 	})
 	if err != nil {
@@ -125,14 +128,20 @@ func (w *worker) process(ctx context.Context, m db.Monitor) {
 	log.Printf("[%s] %s -> %s (code=%d, %dms)", w.cfg.WorkerID, m.Name, dec.ResultStatus, res.StatusCode, rt)
 
 	if dec.OpenIncident {
-		w.alertDown(ctx, m, dec.Cause)
+		w.alertDown(ctx, m, dec.Cause, false)
+	}
+	if dec.SendReminder {
+		// still down: repeat the alert (cause comes from this probe's error)
+		w.alertDown(ctx, m, res.Error, true)
 	}
 	if resolved != nil && resolved.ResolvedAt != nil {
 		w.alertRecovered(ctx, m, resolved.ResolvedAt.Sub(resolved.StartedAt))
 	}
 }
 
-func (w *worker) alertDown(ctx context.Context, m db.Monitor, cause string) {
+// alertDown fans out a down alert to every channel. When reminder is true the
+// monitor was already down and this is a periodic re-alert.
+func (w *worker) alertDown(ctx context.Context, m db.Monitor, cause string, reminder bool) {
 	byType, err := w.store.EnabledWebhooksByType(ctx, m.OrganizationID)
 	if err != nil || len(byType) == 0 {
 		return
@@ -141,12 +150,12 @@ func (w *worker) alertDown(ctx context.Context, m db.Monitor, cause string) {
 		cause = "no response"
 	}
 	if hooks := byType["discord"]; len(hooks) > 0 {
-		if err := w.discord.NotifyDown(ctx, hooks, m.Name, m.URL, cause); err != nil {
+		if err := w.discord.NotifyDown(ctx, hooks, m.Name, m.URL, cause, reminder); err != nil {
 			log.Printf("[%s] discord down alert failed: %v", w.cfg.WorkerID, err)
 		}
 	}
 	if hooks := byType["slack"]; len(hooks) > 0 {
-		if err := w.slack.NotifyDown(ctx, hooks, m.Name, m.URL, cause); err != nil {
+		if err := w.slack.NotifyDown(ctx, hooks, m.Name, m.URL, cause, reminder); err != nil {
 			log.Printf("[%s] slack down alert failed: %v", w.cfg.WorkerID, err)
 		}
 	}

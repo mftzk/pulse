@@ -4,6 +4,8 @@
 // so the flapping/threshold rules are trivially unit-testable.
 package incident
 
+import "time"
+
 const (
 	StatusUp      = "up"
 	StatusDown    = "down"
@@ -15,6 +17,11 @@ type State struct {
 	CurrentStatus       string
 	ConsecutiveFailures int
 	FailThreshold       int // number of consecutive failures required to declare down
+	// reminder config: while the monitor stays down, repeat the down alert every
+	// ReminderInterval. Zero disables reminders. LastAlertSentAt is when the most
+	// recent down/reminder alert went out (nil if none yet).
+	ReminderInterval time.Duration
+	LastAlertSentAt  *time.Time
 }
 
 // Decision is the computed outcome to persist.
@@ -24,13 +31,16 @@ type Decision struct {
 	ConsecutiveFailures int
 	OpenIncident        bool // transitioned into down -> open an incident + alert
 	ResolveIncident     bool // recovered from down -> resolve incident + alert
+	SendReminder        bool // still down and a reminder interval has elapsed -> re-alert
+	MarkAlerted         bool // a down/reminder alert is being sent -> stamp last_alert_sent_at
 	Cause               string
 }
 
 // Evaluate applies the threshold rules. `cause` describes the failure (ignored
-// when up). A monitor is only declared down after FailThreshold consecutive
-// failures, which suppresses single-blip flapping.
-func Evaluate(prev State, probeUp bool, cause string) Decision {
+// when up); `now` is the probe time, used to decide whether a down reminder is
+// due. A monitor is only declared down after FailThreshold consecutive failures,
+// which suppresses single-blip flapping.
+func Evaluate(prev State, probeUp bool, cause string, now time.Time) Decision {
 	threshold := prev.FailThreshold
 	if threshold < 1 {
 		threshold = 1
@@ -54,11 +64,31 @@ func Evaluate(prev State, probeUp bool, cause string) Decision {
 	}
 	if fails >= threshold {
 		d.NewStatus = StatusDown
-		// only open a new incident on the transition into down
-		d.OpenIncident = prev.CurrentStatus != StatusDown
+		if prev.CurrentStatus != StatusDown {
+			// transition into down -> open an incident and fire the first alert
+			d.OpenIncident = true
+		} else if reminderDue(prev, now) {
+			// already down -> repeat the alert once the reminder interval elapses
+			d.SendReminder = true
+		}
 	} else {
 		// not yet confirmed down; keep prior confirmed status
 		d.NewStatus = prev.CurrentStatus
 	}
+	// any down alert we emit (initial or reminder) restamps the reminder clock
+	d.MarkAlerted = d.OpenIncident || d.SendReminder
 	return d
+}
+
+// reminderDue reports whether enough time has passed since the last down alert
+// to send another reminder. Reminders are off when ReminderInterval <= 0.
+func reminderDue(prev State, now time.Time) bool {
+	if prev.ReminderInterval <= 0 {
+		return false
+	}
+	if prev.LastAlertSentAt == nil {
+		// confirmed down but no alert recorded yet (e.g. legacy row) -> send one
+		return true
+	}
+	return now.Sub(*prev.LastAlertSentAt) >= prev.ReminderInterval
 }

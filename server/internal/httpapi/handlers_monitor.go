@@ -25,8 +25,14 @@ type monitorInput struct {
 	FollowRedirects *bool          `json:"follow_redirects"`
 	Headers         map[string]any `json:"headers"`
 	FailThreshold   int            `json:"fail_threshold"`
-	Enabled         *bool          `json:"enabled"`
+	// ReminderIntervalSeconds re-sends the down alert every N seconds while down.
+	// Pointer so an omitted field applies the default; 0 disables reminders.
+	ReminderIntervalSeconds *int  `json:"reminder_interval_seconds"`
+	Enabled                 *bool `json:"enabled"`
 }
+
+// defaultReminderInterval is used when the client omits reminder_interval_seconds.
+const defaultReminderInterval = 600 // 10 minutes
 
 // toMonitor validates input and applies defaults, producing a db.Monitor.
 func (in monitorInput) toMonitor(orgID string) (db.Monitor, string) {
@@ -40,17 +46,18 @@ func (in monitorInput) toMonitor(orgID string) (db.Monitor, string) {
 	}
 
 	m := db.Monitor{
-		OrganizationID:  orgID,
-		Name:            name,
-		URL:             url,
-		Method:          strings.ToUpper(strings.TrimSpace(in.Method)),
-		ExpectedStatus:  in.ExpectedStatus,
-		IntervalSeconds: in.IntervalSeconds,
-		TimeoutMs:       in.TimeoutMs,
-		FollowRedirects: true,
-		Headers:         in.Headers,
-		FailThreshold:   in.FailThreshold,
-		Enabled:         true,
+		OrganizationID:          orgID,
+		Name:                    name,
+		URL:                     url,
+		Method:                  strings.ToUpper(strings.TrimSpace(in.Method)),
+		ExpectedStatus:          in.ExpectedStatus,
+		IntervalSeconds:         in.IntervalSeconds,
+		TimeoutMs:               in.TimeoutMs,
+		FollowRedirects:         true,
+		Headers:                 in.Headers,
+		FailThreshold:           in.FailThreshold,
+		ReminderIntervalSeconds: defaultReminderInterval,
+		Enabled:                 true,
 	}
 	if m.Method == "" {
 		m.Method = "GET"
@@ -63,6 +70,13 @@ func (in monitorInput) toMonitor(orgID string) (db.Monitor, string) {
 	}
 	if m.FailThreshold < 1 {
 		m.FailThreshold = 1
+	}
+	// nil -> default; an explicit value (including 0 to disable) is honored.
+	if in.ReminderIntervalSeconds != nil {
+		m.ReminderIntervalSeconds = *in.ReminderIntervalSeconds
+		if m.ReminderIntervalSeconds < 0 {
+			m.ReminderIntervalSeconds = 0
+		}
 	}
 	if in.FollowRedirects != nil {
 		m.FollowRedirects = *in.FollowRedirects

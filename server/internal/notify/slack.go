@@ -58,10 +58,16 @@ func (s *Slack) send(ctx context.Context, webhookURL string, att slackAttachment
 }
 
 // NotifyDown sends a "down" alert to every webhook, returning the first error.
-func (s *Slack) NotifyDown(ctx context.Context, webhooks []string, monitorName, url, cause string) error {
+// When reminder is true this is a periodic re-alert for a monitor that is still
+// down rather than the initial transition.
+func (s *Slack) NotifyDown(ctx context.Context, webhooks []string, monitorName, url, cause string, reminder bool) error {
+	title := "🔴 " + monitorName + " is DOWN"
+	if reminder {
+		title = "🔴 " + monitorName + " is STILL DOWN"
+	}
 	att := slackAttachment{
 		Color: slackRed,
-		Title: "🔴 " + monitorName + " is DOWN",
+		Title: title,
 		Text:  fmt.Sprintf("*URL:* %s\n*Reason:* %s", url, cause),
 	}
 	return s.fanout(ctx, webhooks, att)

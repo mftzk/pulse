@@ -26,23 +26,27 @@ type Member struct {
 }
 
 type Monitor struct {
-	ID                  string         `json:"id"`
-	OrganizationID      string         `json:"organization_id"`
-	Name                string         `json:"name"`
-	URL                 string         `json:"url"`
-	Method              string         `json:"method"`
-	ExpectedStatus      int            `json:"expected_status"`
-	IntervalSeconds     int            `json:"interval_seconds"`
-	TimeoutMs           int            `json:"timeout_ms"`
-	FollowRedirects     bool           `json:"follow_redirects"`
-	Headers             map[string]any `json:"headers"`
-	FailThreshold       int            `json:"fail_threshold"`
-	Enabled             bool           `json:"enabled"`
-	CurrentStatus       string         `json:"current_status"`
-	ConsecutiveFailures int            `json:"consecutive_failures"`
-	LastCheckedAt       *time.Time     `json:"last_checked_at"`
-	NextRunAt           time.Time      `json:"next_run_at"`
-	CreatedAt           time.Time      `json:"created_at"`
+	ID              string         `json:"id"`
+	OrganizationID  string         `json:"organization_id"`
+	Name            string         `json:"name"`
+	URL             string         `json:"url"`
+	Method          string         `json:"method"`
+	ExpectedStatus  int            `json:"expected_status"`
+	IntervalSeconds int            `json:"interval_seconds"`
+	TimeoutMs       int            `json:"timeout_ms"`
+	FollowRedirects bool           `json:"follow_redirects"`
+	Headers         map[string]any `json:"headers"`
+	FailThreshold   int            `json:"fail_threshold"`
+	// ReminderIntervalSeconds repeats the down alert every N seconds while the
+	// monitor stays down. 0 disables reminders.
+	ReminderIntervalSeconds int        `json:"reminder_interval_seconds"`
+	Enabled                 bool       `json:"enabled"`
+	CurrentStatus           string     `json:"current_status"`
+	ConsecutiveFailures     int        `json:"consecutive_failures"`
+	LastCheckedAt           *time.Time `json:"last_checked_at"`
+	LastAlertSentAt         *time.Time `json:"last_alert_sent_at"`
+	NextRunAt               time.Time  `json:"next_run_at"`
+	CreatedAt               time.Time  `json:"created_at"`
 }
 
 type CheckResult struct {

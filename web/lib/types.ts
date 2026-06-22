@@ -35,10 +35,12 @@ export interface Monitor {
   follow_redirects: boolean;
   headers: Record<string, unknown>;
   fail_threshold: number;
+  reminder_interval_seconds: number;
   enabled: boolean;
   current_status: Status;
   consecutive_failures: number;
   last_checked_at: string | null;
+  last_alert_sent_at: string | null;
   next_run_at: string;
   created_at: string;
 }

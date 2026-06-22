@@ -13,7 +13,8 @@ import (
 // monitorCols is the canonical column list / order used by scanMonitor.
 const monitorCols = `id, organization_id, name, url, method, expected_status,
 	interval_seconds, timeout_ms, follow_redirects, headers, fail_threshold,
-	enabled, current_status, consecutive_failures, last_checked_at, next_run_at, created_at`
+	reminder_interval_seconds, enabled, current_status, consecutive_failures,
+	last_checked_at, last_alert_sent_at, next_run_at, created_at`
 
 func scanMonitor(row pgx.Row) (Monitor, error) {
 	var m Monitor
@@ -21,7 +22,8 @@ func scanMonitor(row pgx.Row) (Monitor, error) {
 	err := row.Scan(
 		&m.ID, &m.OrganizationID, &m.Name, &m.URL, &m.Method, &m.ExpectedStatus,
 		&m.IntervalSeconds, &m.TimeoutMs, &m.FollowRedirects, &headers, &m.FailThreshold,
-		&m.Enabled, &m.CurrentStatus, &m.ConsecutiveFailures, &m.LastCheckedAt, &m.NextRunAt, &m.CreatedAt,
+		&m.ReminderIntervalSeconds, &m.Enabled, &m.CurrentStatus, &m.ConsecutiveFailures,
+		&m.LastCheckedAt, &m.LastAlertSentAt, &m.NextRunAt, &m.CreatedAt,
 	)
 	if err != nil {
 		return m, err
@@ -45,11 +47,13 @@ func (s *Store) CreateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 	row := s.Pool.QueryRow(ctx,
 		`INSERT INTO monitors
 		   (organization_id, name, url, method, expected_status, interval_seconds,
-		    timeout_ms, follow_redirects, headers, fail_threshold, enabled)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		    timeout_ms, follow_redirects, headers, fail_threshold,
+		    reminder_interval_seconds, enabled)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 		 RETURNING `+monitorCols,
 		m.OrganizationID, m.Name, m.URL, m.Method, m.ExpectedStatus, m.IntervalSeconds,
-		m.TimeoutMs, m.FollowRedirects, headers, m.FailThreshold, m.Enabled,
+		m.TimeoutMs, m.FollowRedirects, headers, m.FailThreshold,
+		m.ReminderIntervalSeconds, m.Enabled,
 	)
 	return scanMonitor(row)
 }
@@ -92,11 +96,12 @@ func (s *Store) UpdateMonitor(ctx context.Context, m Monitor) (Monitor, error) {
 		`UPDATE monitors SET
 		   name=$3, url=$4, method=$5, expected_status=$6, interval_seconds=$7,
 		   timeout_ms=$8, follow_redirects=$9, headers=$10, fail_threshold=$11,
-		   enabled=$12, next_run_at = now()
+		   reminder_interval_seconds=$12, enabled=$13, next_run_at = now()
 		 WHERE id=$1 AND organization_id=$2
 		 RETURNING `+monitorCols,
 		m.ID, m.OrganizationID, m.Name, m.URL, m.Method, m.ExpectedStatus, m.IntervalSeconds,
-		m.TimeoutMs, m.FollowRedirects, headers, m.FailThreshold, m.Enabled,
+		m.TimeoutMs, m.FollowRedirects, headers, m.FailThreshold,
+		m.ReminderIntervalSeconds, m.Enabled,
 	)
 	res, err := scanMonitor(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -166,6 +171,7 @@ type MonitorUpdate struct {
 	ConsecutiveFailures int
 	OpenIncident        bool
 	ResolveIncident     bool
+	MarkAlerted         bool // stamp last_alert_sent_at = now() (initial down or reminder)
 	Cause               string
 }
 
@@ -193,10 +199,11 @@ func (s *Store) ApplyCheckResult(ctx context.Context, m Monitor, out CheckOutcom
 		`UPDATE monitors
 		    SET current_status = $2, consecutive_failures = $3,
 		        last_checked_at = now(),
+		        last_alert_sent_at = CASE WHEN $4 THEN now() ELSE last_alert_sent_at END,
 		        next_run_at = now() + make_interval(secs => interval_seconds),
 		        leased_until = NULL, leased_by = NULL
 		  WHERE id = $1`,
-		m.ID, upd.NewStatus, upd.ConsecutiveFailures,
+		m.ID, upd.NewStatus, upd.ConsecutiveFailures, upd.MarkAlerted,
 	); err != nil {
 		return nil, err
 	}

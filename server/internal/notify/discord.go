@@ -58,9 +58,15 @@ func (d *Discord) send(ctx context.Context, webhookURL string, e embed) error {
 }
 
 // NotifyDown sends a "down" alert to every webhook, returning the first error.
-func (d *Discord) NotifyDown(ctx context.Context, webhooks []string, monitorName, url, cause string) error {
+// When reminder is true this is a periodic re-alert for a monitor that is still
+// down rather than the initial transition.
+func (d *Discord) NotifyDown(ctx context.Context, webhooks []string, monitorName, url, cause string, reminder bool) error {
+	title := "🔴 " + monitorName + " is DOWN"
+	if reminder {
+		title = "🔴 " + monitorName + " is STILL DOWN"
+	}
 	e := embed{
-		Title:       "🔴 " + monitorName + " is DOWN",
+		Title:       title,
 		Description: fmt.Sprintf("**URL:** %s\n**Reason:** %s", url, cause),
 		Color:       colorRed,
 	}
